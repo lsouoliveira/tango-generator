@@ -115,6 +115,16 @@ class Puzzle:
     def get_row(self, index: int) -> List[Optional[Piece]]:
         return self.grid[index]
 
+    def filled_cells_count(self):
+        filled_cells = 0
+
+        for i in range(self.rows_count()):
+            for j in range(self.cols_count()):
+                if self.grid[i][j]:
+                    filled_cells += 1
+
+        return filled_cells
+
     def _are_values_valid(self, values: List[Optional[Piece]]):
         seen = {}
         sequence = 0
@@ -220,10 +230,21 @@ class AdjacentStrategy(SolverStrategy):
     """
 
     def can_apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
-        return ((col - 2 >= 0 and puzzle.peek(row, col - 2) == puzzle.peek(row, col - 1)) or
-            (col + 2 <= 5 and puzzle.peek(row, col + 2) == puzzle.peek(row, col + 1)) or
-            (row - 2 >= 0 and puzzle.peek(row - 2, col) == puzzle.peek(row - 1, col)) or
-            (row + 2 <= 5 and puzzle.peek(row + 2, col) == puzzle.peek(row + 1, col)))
+        return ((col - 2 >= 0 and puzzle.peek(row, col - 2) != None and puzzle.peek(row, col - 2) == puzzle.peek(row, col - 1)) or
+            (col + 2 <= 5 and puzzle.peek(row, col + 2) != None and puzzle.peek(row, col + 2) == puzzle.peek(row, col + 1)) or
+            (row - 2 >= 0 and puzzle.peek(row - 2, col) != None and puzzle.peek(row - 2, col) == puzzle.peek(row - 1, col)) or
+            (row + 2 <= 5 and puzzle.peek(row + 2, col) != None and puzzle.peek(row + 2, col) == puzzle.peek(row + 1, col)))
+
+class EdgeSequenceStrategy(SolverStrategy):
+    """
+    Check if a symbol appears twice on the edge.
+    """
+
+    def can_apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
+        return ((col == 5 and puzzle.peek(row, 0) != None and puzzle.peek(row, 0) == puzzle.peek(row, 1)) or
+            (col == 0 and puzzle.peek(row, 4) != None and puzzle.peek(row, 4) == puzzle.peek(row, 5)) or
+            (row == 5 and puzzle.peek(0, col) and puzzle.peek(0, col) == puzzle.peek(1, col)) or
+            (row == 0 and puzzle.peek(4, col) and puzzle.peek(4, col) == puzzle.peek(5, col)))
 
 class PuzzleSolver:
     puzzle: Puzzle
@@ -234,7 +255,8 @@ class PuzzleSolver:
 
         self.strategies = [
             AddComplementStrategy(),
-            AdjacentStrategy()
+            AdjacentStrategy(),
+            EdgeSequenceStrategy()
         ]
 
         random.shuffle(self.strategies)
@@ -305,13 +327,39 @@ def generate_puzzle_image(puzzle: Puzzle) -> Image:
 
     return image
 
-def main():
-    builder = ProblemBuilder()
-    puzzle = builder.build()
+def symbol_balance(puzzle: Puzzle) -> int:
+    d = {
+        Piece.SUN: 0,
+        Piece.MOON: 0
+    }
 
+    for i in range(puzzle.rows_count()):
+        for j in range(puzzle.cols_count()):
+            symbol = puzzle.peek(i, j)
+
+            if symbol:
+                d[symbol] += 1
+
+    return abs(d[Piece.SUN] -  d[Piece.MOON])
+
+def generate_random_puzzle(min_pieces=7, max_iterations=1000):
+    best_puzzle = puzzle = ProblemBuilder(min_pieces).build()
+
+    for _ in range(max_iterations):
+        puzzle = ProblemBuilder(min_pieces).build()
+        balance_ratio = symbol_balance(puzzle) / puzzle.filled_cells_count()
+
+        if puzzle.filled_cells_count() <= best_puzzle.filled_cells_count() and balance_ratio <= 0.11:
+            best_puzzle = puzzle
+
+    return best_puzzle
+
+def main():
+    puzzle = generate_random_puzzle(min_pieces=5)
     image = generate_puzzle_image(puzzle)
 
     image.show()
+    image.save("output.png")
 
 if __name__ == "__main__":
     main()
