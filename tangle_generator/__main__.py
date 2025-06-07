@@ -214,6 +214,16 @@ class AddComplementStrategy(SolverStrategy):
 
         return False
 
+class AdjacentStrategy(SolverStrategy):
+    """
+    Check if a symbol appears twice in a row on the sides.
+    """
+
+    def can_apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
+        return ((col - 2 >= 0 and puzzle.peek(row, col - 2) == puzzle.peek(row, col - 1)) or
+            (col + 2 <= 5 and puzzle.peek(row, col + 2) == puzzle.peek(row, col + 1)) or
+            (row - 2 >= 0 and puzzle.peek(row - 2, col) == puzzle.peek(row - 1, col)) or
+            (row + 2 <= 5 and puzzle.peek(row + 2, col) == puzzle.peek(row + 1, col)))
 
 class PuzzleSolver:
     puzzle: Puzzle
@@ -223,8 +233,11 @@ class PuzzleSolver:
         self.puzzle = puzzle
 
         self.strategies = [
-            AddComplementStrategy()
+            AddComplementStrategy(),
+            AdjacentStrategy()
         ]
+
+        random.shuffle(self.strategies)
 
     def can_solve_cell(self, row: int, col: int) -> bool:
         for strategy in self.strategies:
@@ -234,11 +247,17 @@ class PuzzleSolver:
         return False
 
 class ProblemBuilder:
+    min_pieces: int
+
+    def __init__(self, min_pieces=4):
+        self.min_pieces = min_pieces
+
     def build(self) -> Puzzle:
         puzzle = PuzzleGenerator().generate()
         solver = PuzzleSolver(puzzle)
 
         cells = [(i, j) for i in range(puzzle.rows_count()) for j in range(puzzle.cols_count())]
+        remaining_pieces = 36
 
         random.shuffle(cells)
 
@@ -249,6 +268,11 @@ class ProblemBuilder:
 
             if not solver.can_solve_cell(i, j):
                 puzzle.place_piece(i, j, symbol)
+            else:
+                remaining_pieces -= 1
+
+            if remaining_pieces <= self.min_pieces:
+                break
 
         return puzzle
 
