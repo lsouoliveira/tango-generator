@@ -2,6 +2,7 @@ from enum import Enum
 from typing import List, Optional
 import random
 from PIL import Image, ImageDraw
+import time
 
 GRID_BORDER_COLOR = "#e6e6e6"
 GRID_TILE_SIZE = 128
@@ -63,6 +64,19 @@ def opposite_piece(piece: Piece) -> Piece:
         return Piece.SUN
     else:
         raise ValueError("Unknown piece type")
+
+
+def direction_between(from_: tuple[int, int], to: tuple[int, int]) -> "Direction":
+    if from_[0] < to[0]:
+        return Direction.DOWN
+    elif from_[0] > to[0]:
+        return Direction.UP
+    elif from_[1] < to[1]:
+        return Direction.RIGHT
+    elif from_[1] > to[1]:
+        return Direction.LEFT
+    else:
+        raise ValueError("Invalid connection direction")
 
 
 INVALID_PUZZLE = [
@@ -129,16 +143,7 @@ class Connection:
         self.connection_type = connection_type
 
     def direction(self) -> Direction:
-        if self.from_[0] < self.to[0]:
-            return Direction.DOWN
-        elif self.from_[0] > self.to[0]:
-            return Direction.UP
-        elif self.from_[1] < self.to[1]:
-            return Direction.RIGHT
-        elif self.from_[1] > self.to[1]:
-            return Direction.LEFT
-        else:
-            raise ValueError("Invalid connection direction")
+        return direction_between(self.from_, self.to)
 
     def is_valid(self) -> bool:
         raise NotImplementedError
@@ -385,6 +390,17 @@ class PuzzleGenerator:
                 continue
 
             connection_type = random.choice(list(ConnectionType))
+
+            if connection_type == ConnectionType.EQUAL:
+                neighbour_connections = puzzle.connections.get(neighbour, [])
+
+                for connection in neighbour_connections:
+                    if (
+                        connection.connection_type == ConnectionType.EQUAL
+                        and direction_between((x, y), neighbour)
+                        == connection.direction()
+                    ):
+                        continue
 
             puzzle.add_connection((x, y), neighbour, connection_type)
 
@@ -937,10 +953,10 @@ def symbol_balance(puzzle: Puzzle) -> int:
     return abs(d[Piece.SUN] - d[Piece.MOON])
 
 
-def generate_random_puzzle(min_pieces=4, max_iterations=0, connections=3) -> Puzzle:
+def generate_random_puzzle(min_pieces=4, iterations=0, connections=3) -> Puzzle:
     best_puzzle = ProblemBuilder(min_pieces, connections).build()
 
-    for _ in range(max_iterations):
+    for _ in range(iterations):
         puzzle = ProblemBuilder(min_pieces, connections).build()
         balance_ratio = symbol_balance(puzzle) / puzzle.filled_cells_count()
 
@@ -954,11 +970,11 @@ def generate_random_puzzle(min_pieces=4, max_iterations=0, connections=3) -> Puz
 
 
 def generate_random_puzzle_by_alternating_pieces(
-    min_pieces=4, max_iterations=0, connections=3
+    min_pieces=4, iterations=0, connections=3
 ) -> Puzzle:
     best_puzzle = ProblemBuilderByAlternatingPieces(min_pieces, connections).build()
 
-    for _ in range(max_iterations):
+    for _ in range(iterations - 1):
         puzzle = ProblemBuilderByAlternatingPieces(min_pieces, connections).build()
 
         if puzzle.filled_cells_count() <= best_puzzle.filled_cells_count():
@@ -967,15 +983,50 @@ def generate_random_puzzle_by_alternating_pieces(
     return best_puzzle
 
 
+def generate_random_puzzle_with_target_pieces(target_pieces: int, connections: int = 3):
+    iterations = 0
+    best_result = 9999
+
+    while True:
+        iterations += 1
+
+        print(f"Iteration {iterations}, best result: {best_result}")
+
+        puzzle = generate_random_puzzle_by_alternating_pieces(
+            min_pieces=target_pieces, connections=connections, iterations=0
+        )
+
+        if puzzle.filled_cells_count() == target_pieces:
+            return puzzle
+        else:
+            if puzzle.filled_cells_count() < best_result:
+                best_result = puzzle.filled_cells_count()
+
+
 def main():
-    puzzle = generate_random_puzzle_by_alternating_pieces(
-        min_pieces=4, max_iterations=200, connections=10
+    iterations = 1000
+    target_pieces = 8
+
+    start = time.time()
+    puzzle = generate_random_puzzle_with_target_pieces(
+        target_pieces=target_pieces, connections=8
     )
+    end = time.time()
 
     image = generate_puzzle_image(puzzle)
 
+    print("")
+    print(f"Puzzle generated in {end - start} seconds")
+    print(f"Iterations count: {iterations}")
+    print(f"Puzzle filled cells count: {puzzle.filled_cells_count()}")
+    print("")
+    print("Generated puzzle:")
+    print(pretty_format_puzzle(puzzle))
+
     image.show()
-    image.save("output.png")
+    image.save(
+        f"{time.strftime('%Y-%m-%d_%H-%M-%S')}_{puzzle.filled_cells_count()}_puzzle.png"
+    )
 
 
 if __name__ == "__main__":
