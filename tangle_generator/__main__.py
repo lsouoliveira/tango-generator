@@ -570,6 +570,57 @@ class AdjacentToEqualStrategy(SolverStrategy):
         return False
 
 
+class FillEqualStrategy(SolverStrategy):
+    """
+    Check if there is an equal connection for the target cell. If the to
+    cell is filled, fill the same symbol in the to cell.
+    """
+
+    def apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
+        connections = puzzle.connections.get((row, col), [])
+
+        for connection in connections:
+            if connection.connection_type != ConnectionType.EQUAL:
+                continue
+
+            piece_to = puzzle.peek(connection.to[0], connection.to[1])
+
+            if not piece_to:
+                continue
+
+            puzzle.place_piece(row, col, piece_to)
+
+            return True
+
+        return False
+
+
+class FillDifferentStrategy(SolverStrategy):
+    """
+    Check if there is a different connection for the target cell. If the to
+    cell is filled, fill the opposite symbol in the to cell.
+    """
+
+    def apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
+        connections = puzzle.connections.get((row, col), [])
+
+        for connection in connections:
+            if connection.connection_type != ConnectionType.DIFFERENT:
+                continue
+
+            piece_to = puzzle.peek(connection.to[0], connection.to[1])
+
+            if not piece_to:
+                continue
+
+            opposite_symbol = opposite_piece(piece_to)
+            puzzle.place_piece(row, col, opposite_symbol)
+
+            return True
+
+        return False
+
+
 class PuzzleSolver:
     puzzle: Puzzle
     strategies: List[SolverStrategy]
@@ -582,6 +633,8 @@ class PuzzleSolver:
             AdjacentStrategy(),
             EdgeSequenceStrategy(),
             AdjacentToEqualStrategy(),
+            FillEqualStrategy(),
+            FillDifferentStrategy(),
         ]
 
         random.shuffle(self.strategies)
@@ -838,7 +891,9 @@ def generate_random_puzzle_by_alternating_pieces(
 
 
 def main():
-    puzzle = generate_random_puzzle_by_alternating_pieces(min_pieces=4, connections=8)
+    puzzle = generate_random_puzzle_by_alternating_pieces(
+        min_pieces=4, max_iterations=200, connections=10
+    )
 
     image = generate_puzzle_image(puzzle)
 
