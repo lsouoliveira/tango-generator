@@ -8,28 +8,33 @@ GRID_TILE_SIZE = 128
 OUTPUT_IMAGE_SIZE = (GRID_TILE_SIZE * 6, GRID_TILE_SIZE * 6)
 SUN_IMAGE_HEIGHT = 128
 MOON_IMAGE_HEIGHT = SUN_IMAGE_HEIGHT // 2
+X_IMAGE_HEIGHT = SUN_IMAGE_HEIGHT // 4
+EQUAL_SIGN_IMAGE_HEIGHT = SUN_IMAGE_HEIGHT // 4
+
 
 def resize_to_fit(image, height):
     new_width = int(height * image.width / image.height)
 
     return image.resize((new_width, height), Image.LANCZOS)
 
+
 sun_image = resize_to_fit(Image.open("assets/sun.png"), SUN_IMAGE_HEIGHT)
 moon_image = resize_to_fit(Image.open("assets/moon.png"), MOON_IMAGE_HEIGHT)
+x_image = resize_to_fit(Image.open("assets/x.png"), X_IMAGE_HEIGHT)
+equal_sign_image = resize_to_fit(
+    Image.open("assets/equal_sign.png"), EQUAL_SIGN_IMAGE_HEIGHT
+)
+
 
 class Piece(Enum):
     SUN = 0
     MOON = 1
 
-PIECE_TO_SYMBOL = {
-    Piece.SUN: "SUN",
-    Piece.MOON: "MOON"
-}
 
-PIECE_TO_IMAGE = {
-    Piece.SUN: sun_image,
-    Piece.MOON: moon_image
-}
+PIECE_TO_SYMBOL = {Piece.SUN: "SUN", Piece.MOON: "MOON"}
+
+PIECE_TO_IMAGE = {Piece.SUN: sun_image, Piece.MOON: moon_image}
+
 
 def pretty_format_puzzle(puzzle: "Puzzle") -> str:
     output = ""
@@ -50,6 +55,16 @@ def pretty_format_puzzle(puzzle: "Puzzle") -> str:
 
     return output
 
+
+def opposite_piece(piece: Piece) -> Piece:
+    if piece == Piece.SUN:
+        return Piece.MOON
+    elif piece == Piece.MOON:
+        return Piece.SUN
+    else:
+        raise ValueError("Unknown piece type")
+
+
 INVALID_PUZZLE = [
     [Piece.SUN, Piece.SUN, None, None, Piece.SUN, None],
     [None, None, None, None, None, None],
@@ -59,6 +74,7 @@ INVALID_PUZZLE = [
     [Piece.SUN, None, None, None, None, None],
 ]
 
+
 def empty_puzzle():
     return [
         [None, None, None, None, None, None],
@@ -66,8 +82,9 @@ def empty_puzzle():
         [None, None, None, None, None, None],
         [None, None, None, None, None, None],
         [None, None, None, None, None, None],
-        [None, None, None, None, None, None]
+        [None, None, None, None, None, None],
     ]
+
 
 def group_sequence(sequence: List[Optional[Piece]]) -> dict:
     d = {}
@@ -81,11 +98,88 @@ def group_sequence(sequence: List[Optional[Piece]]) -> dict:
     return d
 
 
+class ConnectionType(Enum):
+    EQUAL = 0
+    DIFFERENT = 1
+
+
+class Direction(Enum):
+    UP = 0
+    DOWN = 1
+    LEFT = 2
+    RIGHT = 3
+
+
+class Connection:
+    from_: tuple[int, int]
+    to: tuple[int, int]
+    connection_type: ConnectionType
+    puzzle: "Puzzle"
+
+    def __init__(
+        self,
+        from_: tuple[int, int],
+        to: tuple[int, int],
+        puzzle: "Puzzle",
+        connection_type: ConnectionType,
+    ):
+        self.from_ = from_
+        self.to = to
+        self.puzzle = puzzle
+        self.connection_type = connection_type
+
+    def direction(self) -> Direction:
+        if self.from_[0] < self.to[0]:
+            return Direction.DOWN
+        elif self.from_[0] > self.to[0]:
+            return Direction.UP
+        elif self.from_[1] < self.to[1]:
+            return Direction.RIGHT
+        elif self.from_[1] > self.to[1]:
+            return Direction.LEFT
+        else:
+            raise ValueError("Invalid connection direction")
+
+    def is_valid(self) -> bool:
+        raise NotImplementedError
+
+
+class EqualConnection(Connection):
+    def __init__(self, from_: tuple[int, int], to: tuple[int, int], puzzle: "Puzzle"):
+        super().__init__(from_, to, puzzle, ConnectionType.EQUAL)
+
+    def is_valid(self) -> bool:
+        piece_from = self.puzzle.peek(self.from_[0], self.from_[1])
+        piece_to = self.puzzle.peek(self.to[0], self.to[1])
+
+        if not piece_from or not piece_to:
+            return True
+
+        return piece_from == piece_to
+
+
+class DifferentConnection(Connection):
+    def __init__(self, from_: tuple[int, int], to: tuple[int, int], puzzle: "Puzzle"):
+        super().__init__(from_, to, puzzle, ConnectionType.DIFFERENT)
+
+    def is_valid(self) -> bool:
+        piece_from = self.puzzle.peek(self.from_[0], self.from_[1])
+        piece_to = self.puzzle.peek(self.to[0], self.to[1])
+
+        if not piece_from or not piece_to:
+            return True
+
+        return piece_from != piece_to
+
+
 class Puzzle:
     grid: List[List[Optional[Piece]]]
 
+    connections: dict[tuple[int, int], List[Connection]]
+
     def __init__(self, grid):
         self.grid = grid
+        self.connections = {}
 
     def peek(self, row, col) -> Optional[Piece]:
         return self.grid[row][col]
@@ -98,10 +192,64 @@ class Puzzle:
 
     def is_valid(self) -> bool:
         rows = [self.grid[i] for i in range(self.rows_count())]
-        columns = [[self.grid[i][j] for i in range(self.rows_count())] for j in range(self.cols_count())]
+        columns = [
+            [self.grid[i][j] for i in range(self.rows_count())]
+            for j in range(self.cols_count())
+        ]
         sequences = rows + columns
+        are_connections_valid = self._are_connections_valid()
 
-        return all(map(lambda x: self._are_values_valid(x), sequences))
+        return (
+            all(map(lambda x: self._are_values_valid(x), sequences))
+            and are_connections_valid
+        )
+
+    def add_connection(
+        self,
+        from_: tuple[int, int],
+        to: tuple[int, int],
+        connection_type: ConnectionType,
+    ):
+        if from_ not in self.connections:
+            self.connections[from_] = []
+
+        if to not in self.connections:
+            self.connections[to] = []
+
+        from_connection = self.build_connection(from_, to, connection_type)
+        to_connection = self.build_connection(to, from_, connection_type)
+
+        self.connections[from_].append(from_connection)
+        self.connections[to].append(to_connection)
+
+    def build_connection(
+        self,
+        from_: tuple[int, int],
+        to: tuple[int, int],
+        connection_type: ConnectionType,
+    ) -> Connection:
+        if connection_type == ConnectionType.EQUAL:
+            return EqualConnection(from_, to, self)
+        elif connection_type == ConnectionType.DIFFERENT:
+            return DifferentConnection(from_, to, self)
+        else:
+            raise ValueError("Unknown connection type")
+
+    def get_connection(
+        self, from_: tuple[int, int], to: tuple[int, int]
+    ) -> Optional[Connection]:
+        if from_ in self.connections:
+            for connection in self.connections[from_]:
+                if connection.to == to:
+                    return connection
+        return None
+
+    def get_neighbours(self, row: int, col: int) -> List[tuple[int, int]]:
+        neighbours = [(row - 1, col), (row + 1, col), (row, col - 1), (row, col + 1)]
+
+        return list(
+            filter(lambda x: not self._is_out_of_bounds(x[0], x[1]), neighbours)
+        )
 
     def rows_count(self) -> int:
         return len(self.grid)
@@ -152,25 +300,47 @@ class Puzzle:
 
         return True
 
+    def _are_connections_valid(self) -> bool:
+        for connections in self.connections.values():
+            for connection in connections:
+                if not connection.is_valid():
+                    return False
+
+        return True
+
+    def _is_out_of_bounds(self, row: int, col: int) -> bool:
+        return (
+            row < 0 or row >= self.rows_count() or col < 0 or col >= self.cols_count()
+        )
+
     def __repr__(self):
         return pretty_format_puzzle(self)
 
-class PuzzleGenerator:
-    rows: int
-    cols: int
 
-    def __init__(self, rows: int = 3, cols: int = 3):
-        self.rows = rows
-        self.cols = cols
+class PuzzleGenerator:
+    """
+    Generates a random puzzle with a given number of connections.
+    """
+
+    connections: int
+
+    def __init__(self, connections: int = 3):
+        self.connections = connections
 
     def generate(self) -> Puzzle:
         cell = 0
         stack = []
         puzzle = Puzzle(empty_puzzle())
 
+        self._add_connections(puzzle)
+
         stack.append(self._symbols())
 
+        iterations = 0
+
         while len(stack) and cell < 36:
+            iterations += 1
+
             symbols = stack[-1]
 
             if len(symbols) == 0:
@@ -199,9 +369,32 @@ class PuzzleGenerator:
 
         return symbols
 
+    def _add_connections(self, puzzle: Puzzle):
+        i = self.connections
+
+        while i > 0:
+            x, y = random.randint(0, 5), random.randint(0, 5)
+            neighbours = puzzle.get_neighbours(x, y)
+
+            if len(neighbours) == 0:
+                continue
+
+            neighbour = random.choice(neighbours)
+
+            if puzzle.get_connection((x, y), neighbour):
+                continue
+
+            connection_type = random.choice(list(ConnectionType))
+
+            puzzle.add_connection((x, y), neighbour, connection_type)
+
+            i -= 1
+
+
 class SolverStrategy:
-    def can_apply_at(self, puzzle: Puzzle, row: int, col: int) -> Puzzle:
+    def apply_at(self, puzzle: Puzzle, row: int, col: int) -> Puzzle:
         raise NotImplementedError
+
 
 class AddComplementStrategy(SolverStrategy):
     """
@@ -209,42 +402,117 @@ class AddComplementStrategy(SolverStrategy):
     If true, fills the cell with the opposite symbol.
     """
 
-    def can_apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
+    def apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
         row_groups = group_sequence(puzzle.get_row(row))
 
-        for v in row_groups.values():
+        for k, v in row_groups.items():
             if v >= 3:
+                opposite_symbol = opposite_piece(k)
+
+                puzzle.place_piece(row, col, opposite_symbol)
+
                 return True
 
         col_groups = group_sequence(puzzle.get_column(col))
 
-        for v in col_groups.values():
+        for k, v in col_groups.items():
             if v >= 3:
+                opposite_symbol = opposite_piece(k)
+
+                puzzle.place_piece(row, col, opposite_symbol)
+
                 return True
 
         return False
+
 
 class AdjacentStrategy(SolverStrategy):
     """
     Check if a symbol appears twice in a row on the sides.
     """
 
-    def can_apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
-        return ((col - 2 >= 0 and puzzle.peek(row, col - 2) != None and puzzle.peek(row, col - 2) == puzzle.peek(row, col - 1)) or
-            (col + 2 <= 5 and puzzle.peek(row, col + 2) != None and puzzle.peek(row, col + 2) == puzzle.peek(row, col + 1)) or
-            (row - 2 >= 0 and puzzle.peek(row - 2, col) != None and puzzle.peek(row - 2, col) == puzzle.peek(row - 1, col)) or
-            (row + 2 <= 5 and puzzle.peek(row + 2, col) != None and puzzle.peek(row + 2, col) == puzzle.peek(row + 1, col)))
+    def apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
+        if (
+            col - 2 >= 0
+            and puzzle.peek(row, col - 2) != None
+            and puzzle.peek(row, col - 2) == puzzle.peek(row, col - 1)
+        ):
+            puzzle.place_piece(row, col, opposite_piece(puzzle.peek(row, col - 1)))
+
+            return True
+
+        if (
+            col + 2 <= 5
+            and puzzle.peek(row, col + 2) != None
+            and puzzle.peek(row, col + 2) == puzzle.peek(row, col + 1)
+        ):
+            puzzle.place_piece(row, col, opposite_piece(puzzle.peek(row, col + 1)))
+
+            return True
+
+        if (
+            row - 2 >= 0
+            and puzzle.peek(row - 2, col) != None
+            and puzzle.peek(row - 2, col) == puzzle.peek(row - 1, col)
+        ):
+            puzzle.place_piece(row, col, opposite_piece(puzzle.peek(row - 1, col)))
+
+            return True
+
+        if (
+            row + 2 <= 5
+            and puzzle.peek(row + 2, col) != None
+            and puzzle.peek(row + 2, col) == puzzle.peek(row + 1, col)
+        ):
+            puzzle.place_piece(row, col, opposite_piece(puzzle.peek(row + 1, col)))
+
+            return True
+
 
 class EdgeSequenceStrategy(SolverStrategy):
     """
     Check if a symbol appears twice on the edge.
     """
 
-    def can_apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
-        return ((col == 5 and puzzle.peek(row, 0) != None and puzzle.peek(row, 0) == puzzle.peek(row, 1)) or
-            (col == 0 and puzzle.peek(row, 4) != None and puzzle.peek(row, 4) == puzzle.peek(row, 5)) or
-            (row == 5 and puzzle.peek(0, col) and puzzle.peek(0, col) == puzzle.peek(1, col)) or
-            (row == 0 and puzzle.peek(4, col) and puzzle.peek(4, col) == puzzle.peek(5, col)))
+    def apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
+        if (
+            col == 5
+            and puzzle.peek(row, 0) != None
+            and puzzle.peek(row, 0) == puzzle.peek(row, 1)
+        ):
+            puzzle.place_piece(row, col, opposite_piece(puzzle.peek(row, 1)))
+
+            return True
+
+        if (
+            col == 0
+            and puzzle.peek(row, 4) != None
+            and puzzle.peek(row, 4) == puzzle.peek(row, 5)
+        ):
+            puzzle.place_piece(row, col, opposite_piece(puzzle.peek(row, 4)))
+
+            return True
+
+        if (
+            row == 5
+            and puzzle.peek(0, col)
+            and puzzle.peek(0, col) == puzzle.peek(1, col)
+        ):
+            puzzle.place_piece(row, col, opposite_piece(puzzle.peek(1, col)))
+
+            return True
+
+        if (
+            row == 0
+            and puzzle.peek(4, col)
+            and puzzle.peek(4, col) == puzzle.peek(5, col)
+        ):
+            puzzle.place_piece(row, col, opposite_piece(puzzle.peek(4, col)))
+
+            return True
+
+        return False
+
 
 class PuzzleSolver:
     puzzle: Puzzle
@@ -256,34 +524,45 @@ class PuzzleSolver:
         self.strategies = [
             AddComplementStrategy(),
             AdjacentStrategy(),
-            EdgeSequenceStrategy()
+            EdgeSequenceStrategy(),
         ]
 
         random.shuffle(self.strategies)
 
     def can_solve_cell(self, row: int, col: int) -> bool:
         for strategy in self.strategies:
-            if strategy.can_apply_at(self.puzzle, row, col):
+            if strategy.apply_at(self.puzzle, row, col) and self.puzzle.is_valid():
                 return True
 
         return False
 
+
 class ProblemBuilder:
     min_pieces: int
+    connections: int
 
-    def __init__(self, min_pieces=4):
+    def __init__(self, min_pieces=4, connections=3):
         self.min_pieces = min_pieces
+        self.connections = connections
 
     def build(self) -> Puzzle:
-        puzzle = PuzzleGenerator().generate()
+        puzzle = PuzzleGenerator(connections=self.connections).generate()
+
+        while puzzle.filled_cells_count() < 36:
+            puzzle = PuzzleGenerator(connections=self.connections).generate()
+
         solver = PuzzleSolver(puzzle)
 
-        cells = [(i, j) for i in range(puzzle.rows_count()) for j in range(puzzle.cols_count())]
+        cells = [
+            (i, j)
+            for i in range(puzzle.rows_count())
+            for j in range(puzzle.cols_count())
+        ]
         remaining_pieces = 36
 
         random.shuffle(cells)
 
-        for (i, j) in cells:
+        for i, j in cells:
             symbol = puzzle.peek(i, j)
 
             puzzle.place_piece(i, j, None)
@@ -291,6 +570,7 @@ class ProblemBuilder:
             if not solver.can_solve_cell(i, j):
                 puzzle.place_piece(i, j, symbol)
             else:
+                puzzle.place_piece(i, j, None)
                 remaining_pieces -= 1
 
             if remaining_pieces <= self.min_pieces:
@@ -298,21 +578,34 @@ class ProblemBuilder:
 
         return puzzle
 
+
 def generate_puzzle_image(puzzle: Puzzle) -> Image:
     image = Image.new("RGB", OUTPUT_IMAGE_SIZE, "white")
     draw = ImageDraw.Draw(image)
 
     for i in range(7):
         if i < 6:
-            draw.line([(0, i * GRID_TILE_SIZE), (image.width, i * GRID_TILE_SIZE)], fill=GRID_BORDER_COLOR)
+            draw.line(
+                [(0, i * GRID_TILE_SIZE), (image.width, i * GRID_TILE_SIZE)],
+                fill=GRID_BORDER_COLOR,
+            )
         else:
-            draw.line([(0, i * GRID_TILE_SIZE - 1), (image.width, i * GRID_TILE_SIZE - 1)], fill=GRID_BORDER_COLOR)
+            draw.line(
+                [(0, i * GRID_TILE_SIZE - 1), (image.width, i * GRID_TILE_SIZE - 1)],
+                fill=GRID_BORDER_COLOR,
+            )
 
     for i in range(7):
         if i < 6:
-            draw.line([(i * GRID_TILE_SIZE, 0), (i * GRID_TILE_SIZE, image.height)], fill=GRID_BORDER_COLOR)
+            draw.line(
+                [(i * GRID_TILE_SIZE, 0), (i * GRID_TILE_SIZE, image.height)],
+                fill=GRID_BORDER_COLOR,
+            )
         else:
-            draw.line([(i * GRID_TILE_SIZE - 1, 0), (i * GRID_TILE_SIZE - 1, image.height)], fill=GRID_BORDER_COLOR)
+            draw.line(
+                [(i * GRID_TILE_SIZE - 1, 0), (i * GRID_TILE_SIZE - 1, image.height)],
+                fill=GRID_BORDER_COLOR,
+            )
 
     for i in range(puzzle.rows_count()):
         for j in range(puzzle.cols_count()):
@@ -323,15 +616,66 @@ def generate_puzzle_image(puzzle: Puzzle) -> Image:
 
             symbol_image = PIECE_TO_IMAGE[symbol]
 
-            image.paste(symbol_image, (i * GRID_TILE_SIZE + GRID_TILE_SIZE // 2 - symbol_image.width // 2, j * GRID_TILE_SIZE + GRID_TILE_SIZE // 2 - symbol_image.height // 2), symbol_image)
+            image.paste(
+                symbol_image,
+                (
+                    i * GRID_TILE_SIZE + GRID_TILE_SIZE // 2 - symbol_image.width // 2,
+                    j * GRID_TILE_SIZE + GRID_TILE_SIZE // 2 - symbol_image.height // 2,
+                ),
+                symbol_image,
+            )
+
+    drawn_connections = set()
+
+    dir = {
+        Direction.UP: (-1, 0),
+        Direction.DOWN: (1, 0),
+        Direction.LEFT: (0, -1),
+        Direction.RIGHT: (0, 1),
+    }
+
+    for from_, connections in puzzle.connections.items():
+        for connection in connections:
+            if (from_, connection.to) in drawn_connections or (
+                connection.to,
+                from_,
+            ) in drawn_connections:
+                continue
+
+            drawn_connections.add((from_, connection.to))
+
+            move_row, move_col = dir[connection.direction()]
+            row, col = from_[0] + move_row, from_[1] + move_col
+
+            tile_position = (
+                col * GRID_TILE_SIZE + GRID_TILE_SIZE // 2,
+                row * GRID_TILE_SIZE + GRID_TILE_SIZE,
+            )
+
+            if connection.connection_type == ConnectionType.EQUAL:
+                image.paste(
+                    equal_sign_image,
+                    (
+                        tile_position[0] - equal_sign_image.width // 2,
+                        tile_position[1] - equal_sign_image.height // 2,
+                    ),
+                    equal_sign_image,
+                )
+            elif connection.connection_type == ConnectionType.DIFFERENT:
+                image.paste(
+                    x_image,
+                    (
+                        tile_position[0] - x_image.width // 2,
+                        tile_position[1] - x_image.height // 2,
+                    ),
+                    x_image,
+                )
 
     return image
 
+
 def symbol_balance(puzzle: Puzzle) -> int:
-    d = {
-        Piece.SUN: 0,
-        Piece.MOON: 0
-    }
+    d = {Piece.SUN: 0, Piece.MOON: 0}
 
     for i in range(puzzle.rows_count()):
         for j in range(puzzle.cols_count()):
@@ -340,26 +684,32 @@ def symbol_balance(puzzle: Puzzle) -> int:
             if symbol:
                 d[symbol] += 1
 
-    return abs(d[Piece.SUN] -  d[Piece.MOON])
+    return abs(d[Piece.SUN] - d[Piece.MOON])
 
-def generate_random_puzzle(min_pieces=7, max_iterations=1000):
-    best_puzzle = puzzle = ProblemBuilder(min_pieces).build()
+
+def generate_random_puzzle(min_pieces=4, max_iterations=1000, connections=3) -> Puzzle:
+    best_puzzle = ProblemBuilder(min_pieces, connections).build()
 
     for _ in range(max_iterations):
         puzzle = ProblemBuilder(min_pieces).build()
         balance_ratio = symbol_balance(puzzle) / puzzle.filled_cells_count()
 
-        if puzzle.filled_cells_count() <= best_puzzle.filled_cells_count() and balance_ratio <= 0.11:
+        if (
+            puzzle.filled_cells_count() <= best_puzzle.filled_cells_count()
+            and balance_ratio <= 0.11
+        ):
             best_puzzle = puzzle
 
     return best_puzzle
 
+
 def main():
-    puzzle = generate_random_puzzle(min_pieces=5)
+    puzzle = generate_random_puzzle(min_pieces=4)
     image = generate_puzzle_image(puzzle)
 
     image.show()
     image.save("output.png")
+
 
 if __name__ == "__main__":
     main()
