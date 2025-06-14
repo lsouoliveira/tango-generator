@@ -621,6 +621,82 @@ class FillDifferentStrategy(SolverStrategy):
         return False
 
 
+class DontOverflowStrategy(SolverStrategy):
+    """
+    If there is a filled equal connection in the same row or column between
+    cells other than the target cell and
+    there is an equal connection in the target cell,
+    then fill the cell with the opposite symbol.
+    """
+
+    def apply_at(self, puzzle: Puzzle, row: int, col: int) -> bool:
+        connections = puzzle.connections.get((row, col), [])
+
+        for connection in connections:
+            if connection.connection_type != ConnectionType.EQUAL:
+                continue
+
+            piece_to = puzzle.peek(connection.to[0], connection.to[1])
+
+            if not piece_to:
+                continue
+
+            if connection.direction() in (Direction.LEFT, Direction.RIGHT):
+                for j in range(puzzle.rows_count()):
+                    if j == col:
+                        continue
+
+                    cell_connections = puzzle.connections.get((row, j), [])
+
+                    for cell_connection in cell_connections:
+                        if (
+                            cell_connection.connection_type != ConnectionType.EQUAL
+                            or cell_connection.to == (row, j)
+                            or cell_connection.direction()
+                            not in (Direction.LEFT, Direction.RIGHT)
+                        ):
+                            continue
+
+                        cell_piece_from, cell_piece_to = (
+                            puzzle.peek(row, j),
+                            puzzle.peek(cell_connection.to[0], cell_connection.to[1]),
+                        )
+
+                        if cell_piece_from and cell_piece_to:
+                            opposite_symbol = opposite_piece(piece_to)
+                            puzzle.place_piece(row, col, opposite_symbol)
+
+                            return True
+            elif connection.direction() in (Direction.UP, Direction.DOWN):
+                for i in range(puzzle.cols_count()):
+                    if i == row:
+                        continue
+
+                    cell_connections = puzzle.connections.get((i, col), [])
+
+                    for cell_connection in cell_connections:
+                        if (
+                            cell_connection.connection_type != ConnectionType.EQUAL
+                            or cell_connection.to == (i, col)
+                            or cell_connection.direction()
+                            not in (Direction.UP, Direction.DOWN)
+                        ):
+                            continue
+
+                        cell_piece_from, cell_piece_to = (
+                            puzzle.peek(i, col),
+                            puzzle.peek(cell_connection.to[0], cell_connection.to[1]),
+                        )
+
+                        if cell_piece_from and cell_piece_to:
+                            opposite_symbol = opposite_piece(piece_to)
+                            puzzle.place_piece(row, col, opposite_symbol)
+
+                            return True
+
+        return False
+
+
 class PuzzleSolver:
     puzzle: Puzzle
     strategies: List[SolverStrategy]
@@ -635,6 +711,7 @@ class PuzzleSolver:
             AdjacentToEqualStrategy(),
             FillEqualStrategy(),
             FillDifferentStrategy(),
+            DontOverflowStrategy(),
         ]
 
         random.shuffle(self.strategies)
